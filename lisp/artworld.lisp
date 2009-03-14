@@ -1,5 +1,47 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Notes
+;;
+;; Lots of metaprogramming to create classes where plists would probably do.
+;; The metaprogramming is to stay flexible, the classes are for type safety.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Utilities
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun make-keyword (name) 
+  "Turn a word into a keyword."
+  (values (intern (string-upcase (string name)) "KEYWORD")))
+
+(defun make-reader-symbol (slot)
+  "Make a symbol of the form slot-value."
+  (values (intern (string-upcase (format nil "~s-value" slot)))))
+
+(defmacro deftrivialsubclass (sub super docstring)
+  "Define a trivial subclass of a class."
+  `(defclass ,sub (,super) () (:documentation ,docstring)))
+
+(defun random-range (min max)
+  "Generate a number between min & max, assumes max is greater than min."
+  (+ min
+     (random (- max min))))
+
+(defun random-sign (val)
+  "Return the value with its sign reversed 50% of the time."
+  (if (< 0.5 (random 1.0)) 
+      val
+      (* val -1.0)))
+
+(defun next-value (current min-val max-val min-delta max-delta)
+  "Generate a value between min and max varying from current by the delta."
+  (let* ((delta (random-sign (random-range min-delta max-delta)))
+	 (next (+ current delta)))
+    ;; Constrain to range min-val..max-val
+    (max min-val (min next max-val))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Aesthetics
 ;; Use some meta-programming to make declaring aesthetic types simpler.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -14,21 +56,26 @@
 (defparameter +number-of-aesthetic-properties+ 
   (length +aesthetic-properties+))
 
+(defun define-aesthetic-property-slot (property)
+  `(,property :reader ,(make-reader-symbol property)
+	      :initarg ,(make-keyword property)))
+
 (defmacro define-aesthetic-values-class () 
   `(defclass <aesthetic-values> ()
-     (,(dolist (property (+aesthetic-properties+))
-	       `(,property :reader ,property-value :initarg :,property)))
-     ((:documentation "Aesthetic measures."))))
+     (,@(map 'list #'(lambda (property) 
+		       (define-aesthetic-property-slot property))
+	     +aesthetic-properties+))
+     (:documentation "Aesthetic measures.")))
 
-;; Can the code just be inlined?
 (define-aesthetic-values-class)
 
-(defmacro define-aesthetic-values-subclass (name min-value max-value docstring)
+(defmacro define-aesthetic-values-subclass (name minval maxval docstring)
   `(defclass ,name (<aesthetic-values>)
      ()
-     ((:default-initargs (dolist (property (+aesthetic-properties+))
-			   `(:,property (random-range ,min-value ,max-value))))
-      (:docstring ,docstring))))
+     (:default-initargs ,@(loop for property in +aesthetic-properties+
+			     collect (make-keyword property) 
+			     collect  `(random-range ,minval ,maxval)))
+     (:documentation ,docstring)))
 
 (defparameter aesthetic-strength-start-min -2.0
   "")
@@ -42,7 +89,7 @@
 (defparameter aesthetic-strength-max 10.0
   "")
 
-(define-aesthetic-values-subclass <aesthetic-strengths>
+(define-aesthetic-values-subclass '<aesthetic-strengths>
     aesthetic-strength-start-min aesthetic-strength-start-max 
     "Aesthetic strengths.")
 
@@ -56,21 +103,17 @@
     aesthetic-weight-min aesthetic-weight-max 
     "Aesthetic weights.")
 
+(defmacro sum-aesthetic-properties (values weights)
+  "Create code to sum weight * value for all aesthetic property slots."
+  `(+ ,@(map 'list #'(lambda (property)
+		       `(* (,(make-reader-symbol property) ,values) 
+			   (,(make-reader-symbol property) ,weights)))
+	     +aesthetic-properties+)))
+
 (defmethod evaluate-aesthetic ((values <aesthetic-strengths>) 
 			       (weights <aesthetic-weights>))
   "Score a concrete instance of an aesthetic according to an abstract one."
-  (/ (+ (* (circle-value values) (circle-weight weights)) 
-	(* (triangle-value values) (triangle-weight weights)) 
-	(* (square-value values) (square-weight weights)) 
-	(* (red-value values) (red-weight weights))
-	(* (yellow-value values) (yellow-weight weights)) 
-	(* (blue-value values) (blue-weight weights)) 
-	(* (body-value values) (body-weight weights)) 
-	(* (landscape-value values) (landscape-weight weights)) 
-	(* (abstract-value values) (abstract-weight weights)) 
-	(* (grid-value values) (grid-weight weights)) 
-	(* (perspective-value values) (perspective-weight weights)) 
-	(* (hierarchical-value values) (hierarchical-weight weights)))
+  (/ (sum-aesthetic-properties values weights)
      +number-of-aesthetic-properties+))
 
 ;; (defmethod describe-aesthetic-opinion)
@@ -87,9 +130,6 @@
    (artworks :accessor artworks
 	     :initval (make-vector)))
   ((:documentation "A person. Artworks mean different things in subclasses.")))
-
-(defmacro deftrivialsubclass (sub super docstring)
-  `(defclass ,sub (,super) () (:documentation ,docstring)))
 
 (deftrivialsubclass <artist> <person> "")
 
